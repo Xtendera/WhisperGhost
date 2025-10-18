@@ -1,6 +1,9 @@
-import { z } from 'zod';
-import prisma from '@/server/prisma';
-import { publicProcedure, router } from '../trpc';
+import { ready, server } from "@serenity-kit/opaque";
+import { z } from "zod";
+import prisma from "@/server/prisma";
+import { publicProcedure, router } from "../trpc";
+
+const serverSetup = process.env.OPAQUE_SERVER_SETUP;
 
 // Only allow alphanumeric, dashes, underscores, and periods
 const usernameSchema = z
@@ -32,14 +35,49 @@ export const authRouter = router({
       z.object({
         username: usernameSchema,
         email: z.email(),
-        registrationRequest: z.string()
-      })
+        registrationRequest: z.string(),
+      }),
     )
-    .mutation((req) => {
+    .mutation(async (req) => {
+      await ready; // Wait for OPAQUE to initialize
       if (!isAvailable(req.input.username)) {
         return {
-          error: true,
+          error: "Invalid Username",
+          registrationResponse: "",
         };
       }
+      if (!serverSetup) {
+        return {
+          error: "Invalid Server Secret",
+          registrationResponse: "",
+        };
+      }
+      const user = await prisma.user.create({
+        data: {
+          username: req.input.username,
+          email: req.input.email,
+          passwordRecord: "",
+        },
+      });
+
+      const { registrationResponse } = server.createRegistrationResponse({
+        serverSetup,
+        userIdentifier: user.id,
+        registrationRequest: req.input.registrationRequest,
+      });
+
+      if (!registrationResponse) {
+        return {
+          error: "Internal Server Error: Invalid registrationResponse",
+          registrationResponse: "",
+        };
+      }
+      return {
+        error: "",
+        registrationResponse: registrationResponse,
+      };
     }),
+  finishRegistration: publicProcedure
+    .input(z.string().nonempty())
+    .mutation(async (req) => {}),
 });

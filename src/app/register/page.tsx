@@ -2,7 +2,7 @@
 
 import { client } from "@serenity-kit/opaque";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Button from "@/components/Button";
 import PasswordInput from "@/components/PasswordInput";
 import TextInput from "@/components/TextInput";
@@ -22,6 +22,8 @@ export default function Register() {
   const [passwordState, setPasswordState] =
     useState<ValidationState>("neutral");
   const [confirmState, setConfirmState] = useState<ValidationState>("neutral");
+
+  const registrationState = useRef("");
 
   const { data: isUsernameAvailable, error: usernameError } =
     trpc.auth.validateUsername.useQuery(username, {
@@ -89,12 +91,43 @@ export default function Register() {
     setConfirm(input);
   }
 
+  const initialRegistrationMutation = trpc.auth.initialRegistration.useMutation(
+    {
+      onSuccess: (data) => {
+        if (!data.registrationResponse || data.error) {
+          // TODO: Display error
+          console.error("Registration failed: ", data.error);
+        }
+        const { registrationRecord } = client.finishRegistration({
+          clientRegistrationState: registrationState.current,
+          registrationResponse: data.registrationResponse,
+          password,
+        });
+        // TODO: Finish registration flow
+      },
+      onError: (error) => {
+        // TODO: Display error
+        console.error("Registration failed: ", error);
+      },
+    },
+  );
+
   function onRegister() {
     // Start OPAQUE registration
     const { clientRegistrationState, registrationRequest } =
       client.startRegistration({ password });
 
-    
+    if (!clientRegistrationState) {
+      // TODO: Error handling
+      return;
+    }
+    registrationState.current = clientRegistrationState;
+
+    initialRegistrationMutation.mutate({
+      username,
+      email,
+      registrationRequest,
+    });
   }
 
   return (
