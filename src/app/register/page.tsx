@@ -1,7 +1,9 @@
 "use client";
 
 import { client } from "@serenity-kit/opaque";
+import Cookies from "js-cookie";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import Button from "@/components/Button";
 import PasswordInput from "@/components/PasswordInput";
@@ -12,6 +14,8 @@ import { trpc } from "@/utils/trpc";
 type ValidationState = "neutral" | "success" | "fail";
 
 export default function Register() {
+  const router = useRouter();
+
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -91,6 +95,18 @@ export default function Register() {
     setConfirm(input);
   }
 
+  const finalRegistration = trpc.auth.finalRegistration.useMutation({
+    onSuccess: (data) => {
+      if (data.error) {
+        // TODO: Display error
+        console.error("Final registration failed: ", data.error);
+        return;
+      }
+      // Registration is complete, redirect user to main page
+      router.push("/app");
+    },
+    onError: (error) => {},
+  });
   const initialRegistrationMutation = trpc.auth.initialRegistration.useMutation(
     {
       onSuccess: (data) => {
@@ -103,7 +119,10 @@ export default function Register() {
           registrationResponse: data.registrationResponse,
           password,
         });
-        // TODO: Finish registration flow
+        finalRegistration.mutate({
+          registrationRecord,
+          registrationToken: data.registrationToken,
+        });
       },
       onError: (error) => {
         // TODO: Display error
@@ -143,7 +162,7 @@ export default function Register() {
             .
           </span>
         </div>
-        <form action="" className="mt-4 flex flex-col gap-3 space-y-8">
+        <form action="" onSubmit={(e) => e.preventDefault()} className="mt-4 flex flex-col gap-3 space-y-8">
           <div className="flex flex-col gap-3 space-y-4">
             <div className="flex flex-col">
               <TextInput

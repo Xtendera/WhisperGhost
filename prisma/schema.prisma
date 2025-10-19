@@ -14,8 +14,20 @@ datasource db {
 }
 
 model User {
-  id             String @id @default(uuid())
-  username       String @unique
+  id             String   @id @default(uuid())
+  username       String   @unique
   email          String
   passwordRecord String
+  joinedAt       DateTime
+
+  RefreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id       String   @id @default(nanoid()) // Use nanoid here to differenciate from a user UUID above
+  token    String   @unique
+  issuedAt DateTime
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
 }
