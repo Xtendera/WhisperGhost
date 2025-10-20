@@ -1,7 +1,6 @@
 "use client";
 
 import { client } from "@serenity-kit/opaque";
-import Cookies from "js-cookie";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -105,7 +104,10 @@ export default function Register() {
       // Registration is complete, redirect user to main page
       router.push("/app");
     },
-    onError: (error) => {},
+    onError: (error) => {
+      // TODO: Display error
+      console.error("Registration failed: ", error);
+    },
   });
   const initialRegistrationMutation = trpc.auth.initialRegistration.useMutation(
     {
@@ -162,7 +164,11 @@ export default function Register() {
             .
           </span>
         </div>
-        <form action="" onSubmit={(e) => e.preventDefault()} className="mt-4 flex flex-col gap-3 space-y-8">
+        <form
+          action=""
+          onSubmit={(e) => e.preventDefault()}
+          className="mt-4 flex flex-col gap-3 space-y-8"
+        >
           <div className="flex flex-col gap-3 space-y-4">
             <div className="flex flex-col">
               <TextInput

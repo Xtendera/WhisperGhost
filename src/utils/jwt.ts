@@ -1,14 +1,41 @@
 import { jwtVerify, SignJWT } from "jose";
 import z from "zod";
 
-const JWTBodySchema = z.object({
+// Define the base payload and three extensions for the three JWT types in WG
+const BaseJWTPayloadSchema = z.object({
   sub: z.string(),
-  type: z.string(),
   user: z.string(),
   iat: z.number(),
 });
 
-type JWTBody = z.infer<typeof JWTBodySchema>;
+const RegistrationJWTPayloadSchema = BaseJWTPayloadSchema.extend({
+  type: z.literal("registration"),
+});
+
+const LoginJWTPayloadSchema = BaseJWTPayloadSchema.extend({
+  type: z.literal("login"),
+  state: z.string(),
+});
+
+const AccessJWTPayloadSchema = BaseJWTPayloadSchema.extend({
+  type: z.literal("access"),
+  ref: z.string(),
+});
+
+const JWTPayloadSchema = z.discriminatedUnion("type", [
+  RegistrationJWTPayloadSchema,
+  LoginJWTPayloadSchema,
+  AccessJWTPayloadSchema,
+]);
+
+type JWTPayload = z.infer<typeof JWTPayloadSchema>;
+
+export type RegistrationJWTPayload = z.infer<
+  typeof RegistrationJWTPayloadSchema
+>;
+export type LoginJWTPayload = z.infer<typeof LoginJWTPayloadSchema>;
+export type AccessJWTPayload = z.infer<typeof AccessJWTPayloadSchema>;
+export type AnyJWTPayload = JWTPayload;
 
 function getKey(): Uint8Array {
   const keyString = process.env.JWT_SECRET;
@@ -18,7 +45,7 @@ function getKey(): Uint8Array {
   return new TextEncoder().encode(keyString);
 }
 
-export async function generateToken(body: JWTBody): Promise<string> {
+export async function generateToken(body: JWTPayload): Promise<string> {
   const secret = getKey();
 
   const jwt = await new SignJWT(body)
@@ -29,7 +56,9 @@ export async function generateToken(body: JWTBody): Promise<string> {
   return jwt;
 }
 
-export async function extractTokenBody(token: string): Promise<JWTBody | null> {
+export async function extractTokenBody(
+  token: string,
+): Promise<JWTPayload | null> {
   try {
     const secret = getKey();
 
@@ -38,7 +67,7 @@ export async function extractTokenBody(token: string): Promise<JWTBody | null> {
     });
 
     // Validate the payload structure with Zod
-    const validatedData = JWTBodySchema.parse(payload);
+    const validatedData = JWTPayloadSchema.parse(payload);
     return validatedData;
   } catch (error) {
     console.error("JWT Verification/Validation Error:", error);

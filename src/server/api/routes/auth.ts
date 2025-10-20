@@ -43,7 +43,7 @@ export const authRouter = router({
     )
     .mutation(async (req) => {
       await ready; // Wait for OPAQUE to initialize
-      if (!isAvailable(req.input.username)) {
+      if (!(await isAvailable(req.input.username))) {
         return {
           error: "Invalid Username",
           registrationResponse: "",
@@ -149,30 +149,188 @@ export const authRouter = router({
         };
       }
 
+      // Create access token
+      const accessToken = await generateToken({
+        sub: userId,
+        type: "access",
+        user: body.user,
+        iat: Math.floor(Date.now() / 1000),
+        ref: tokenObj.id,
+      });
+      if (!accessToken) {
+        return {
+          error: "Cannot Generate accessToken",
+          accessToken: "",
+        };
+      }
+
       const refreshCookie = cookie.serialize("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         maxAge: 60 * 60 * 24 * 7, // 7 days
         path: "/",
+        sameSite: "lax",
+      });
+
+      const accessCookie = cookie.serialize("accessToken", accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60, // 1 Hour
+        path: "/",
+        sameSite: "lax",
       });
 
       req.ctx.resHeaders.append("Set-Cookie", refreshCookie);
+      req.ctx.resHeaders.append("Set-Cookie", accessCookie);
 
       return {
         error: "",
       };
     }),
-  // Create access token
-  // const accessToken = await generateToken({
-  //   sub: userId,
-  //   type: "access",
-  //   user: body.user,
-  //   iat: Math.floor(Date.now() / 1000),
-  // });
-  // if (!accessToken) {
-  //   return {
-  //     error: "Cannot Generate accessToken",
-  //     accessToken: "",
-  //   };
-  // }
+  initialLogin: publicProcedure
+    .input(
+      z.object({
+        username: usernameSchema,
+        loginRequest: z.string(),
+      }),
+    )
+    .mutation(async (req) => {
+      await ready;
+      if (!serverSetup) {
+        return {
+          error: "Invalid Server Secret",
+          loginResponse: "",
+          loginToken: "",
+        };
+      }
+
+      const user = await prisma.user.findUnique({
+        where: {
+          username: req.input.username,
+        },
+      });
+
+      if (!user || !user.passwordRecord) {
+        return {
+          error: "Invalid Credentials",
+          loginResponse: "",
+          loginToken: "",
+        };
+      }
+
+      const { serverLoginState, loginResponse } = server.startLogin({
+        serverSetup,
+        userIdentifier: user.id,
+        registrationRecord: user.passwordRecord,
+        startLoginRequest: req.input.loginRequest,
+      });
+
+      if (!serverLoginState || !loginResponse) {
+        return {
+          error: "Invalid Login Challenge",
+          loginResponse: "",
+          loginToken: "",
+        };
+      }
+
+      const loginToken = await generateToken({
+        sub: user.id,
+        user: user.username,
+        type: "login",
+        iat: Math.floor(Date.now() / 1000),
+        state: serverLoginState,
+      });
+
+      return {
+        error: "",
+        loginResponse,
+        loginToken,
+      };
+    }),
+  finalLogin: publicProcedure
+    .input(
+      z.object({
+        loginToken: z.jwt(),
+        finishLoginRequest: z.string(),
+      }),
+    )
+    .mutation(async (req) => {
+      await ready;
+
+      const body = await extractTokenBody(req.input.loginToken);
+
+      if (!body || body.type !== "login" || !body.state) {
+        return {
+          error: "Invalid Token",
+        };
+      }
+
+      const user = await prisma.user.findUnique({
+        where: {
+          id: body.sub,
+        },
+      });
+
+      if (!user || !user.passwordRecord) {
+        return {
+          error: "Invalid Credentials",
+        };
+      }
+
+      try {
+        server.finishLogin({
+          serverLoginState: body.state,
+          finishLoginRequest: req.input.finishLoginRequest,
+        });
+      } catch {
+        return {
+          error: "Invalid Credentials",
+        };
+      }
+
+      const refreshToken = crypto.randomBytes(32).toString("hex");
+
+      const tokenObj = await prisma.refreshToken.create({
+        data: {
+          token: refreshToken,
+          issuedAt: new Date(),
+          user: {
+            connect: {
+              id: user.id,
+            },
+          },
+        },
+      });
+
+      const accessToken = await generateToken({
+        sub: user.id,
+        type: "access",
+        user: user.username,
+        iat: Math.floor(Date.now() / 1000),
+        ref: tokenObj.id,
+      });
+
+      const refreshCookie = cookie.serialize("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24 * 7,
+        path: "/",
+        sameSite: "lax",
+      });
+
+      const accessCookie = cookie.serialize("accessToken", accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60,
+        path: "/",
+        sameSite: "lax",
+      });
+
+      req.ctx.resHeaders.append("Set-Cookie", refreshCookie);
+      req.ctx.resHeaders.append("Set-Cookie", accessCookie);
+
+      return {
+        error: "",
+      };
+    }),
 });
