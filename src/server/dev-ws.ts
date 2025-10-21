@@ -22,7 +22,9 @@ wss.on("connection", (ws) => {
   });
 });
 
-console.log(`✅ WebSocket dev server listening at ws://${hostname}:${port}${path}`);
+console.log(
+  `✅ WebSocket dev server listening at ws://${hostname}:${port}${path}`,
+);
 
 const shutdown = () => {
   handler.broadcastReconnectNotification();

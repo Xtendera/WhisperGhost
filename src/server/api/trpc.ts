@@ -1,8 +1,8 @@
+import type { ServerResponse } from "node:http";
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import type { CreateWSSContextFnOptions } from "@trpc/server/adapters/ws";
-import cookie from "cookie";
-import type { ServerResponse } from "http";
+import * as cookie from "cookie";
 import prisma from "@/server/prisma";
 import { extractTokenBody, generateToken } from "@/utils/jwt";
 
@@ -79,7 +79,9 @@ export const createContext = (options: CreateContextOptions): BaseContext => {
   return {
     type: "ws",
     headers: incomingHeadersToWebHeaders(options.req.headers),
-  resHeaders: createResponseHeaders("res" in options ? options.res : undefined),
+    resHeaders: createResponseHeaders(
+      "res" in options ? options.res : undefined,
+    ),
   };
 };
 

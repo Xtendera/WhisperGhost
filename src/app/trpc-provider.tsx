@@ -24,7 +24,8 @@ export function TRPCProvider({ children }: { children: ReactNode }) {
         ? [http]
         : [
             splitLink({
-              condition: (op) => op.type === "subscription",
+              condition: (op) =>
+                op.type === "subscription" || op.path.startsWith("app."),
               true: wsLink({ client: getWsClient() }),
               false: http,
             }),
