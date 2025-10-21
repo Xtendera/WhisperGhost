@@ -1,7 +1,5 @@
-import type { ServerResponse } from "node:http";
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
-import type { CreateWSSContextFnOptions } from "@trpc/server/adapters/ws";
 import * as cookie from "cookie";
 import prisma from "@/server/prisma";
 import { extractTokenBody, generateToken } from "@/utils/jwt";
@@ -9,10 +7,9 @@ import { extractTokenBody, generateToken } from "@/utils/jwt";
 type ResponseHeaders = Pick<Headers, "append" | "set">;
 
 type BaseContext = {
-  type: "http" | "ws";
   headers: Headers;
   resHeaders: ResponseHeaders;
-  request?: Request;
+  request: Request;
 };
 
 const noopHeaders: ResponseHeaders = {
@@ -20,70 +17,13 @@ const noopHeaders: ResponseHeaders = {
   set() {},
 };
 
-const createResponseHeaders = (res: unknown): ResponseHeaders => {
-  if (res && typeof (res as ServerResponse).setHeader === "function") {
-    const serverRes = res as ServerResponse;
-    return {
-      append(name, value) {
-        const current = serverRes.getHeader(name);
-        if (current === undefined) {
-          serverRes.setHeader(name, value);
-          return;
-        }
-        if (Array.isArray(current)) {
-          serverRes.setHeader(name, [...current, value]);
-          return;
-        }
-        serverRes.setHeader(name, [String(current), value]);
-      },
-      set(name, value) {
-        serverRes.setHeader(name, value);
-      },
-    } satisfies ResponseHeaders;
-  }
-
-  return noopHeaders;
-};
-
-const incomingHeadersToWebHeaders = (
-  headers: NodeJS.Dict<string | string[] | undefined>,
-) => {
-  const result = new Headers();
-  for (const [key, value] of Object.entries(headers)) {
-    if (!key || value == null) continue;
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        result.append(key, entry);
-      }
-      continue;
-    }
-    result.append(key, value);
-  }
-  return result;
-};
-
-type CreateContextOptions =
-  | FetchCreateContextFnOptions
-  | CreateWSSContextFnOptions;
-
-export const createContext = (options: CreateContextOptions): BaseContext => {
-  if ("resHeaders" in options) {
-    return {
-      type: "http",
-      headers: options.req.headers,
-      resHeaders: options.resHeaders,
-      request: options.req,
-    };
-  }
-
-  return {
-    type: "ws",
-    headers: incomingHeadersToWebHeaders(options.req.headers),
-    resHeaders: createResponseHeaders(
-      "res" in options ? options.res : undefined,
-    ),
-  };
-};
+export const createContext = (
+  options: FetchCreateContextFnOptions,
+): BaseContext => ({
+  headers: options.req.headers,
+  resHeaders: options.resHeaders ?? noopHeaders,
+  request: options.req,
+});
 
 export type Context = BaseContext;
 

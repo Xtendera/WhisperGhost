@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import EventEmitter, { on } from "node:events";
-import { tracked } from "@trpc/server";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
 
@@ -12,88 +11,49 @@ type ChatMessage = {
   timestamp: number;
 };
 
-type ConversationEvent =
-  | {
-      type: "self";
-      self: string;
-    }
-  | {
-      type: "message";
-      message: ChatMessage;
-      self: string;
-    };
-
-type ChatEventRecord = {
-  id: string;
-  event: ConversationEvent;
-};
-
+const MESSAGE_HISTORY_LIMIT = 200;
 const subscriptions = new Map<string, string>();
-const usernameToId = new Map<string, string>();
-const emitter = new EventEmitter();
+const conversations = new Map<string, ChatMessage[]>();
 
-emitter.setMaxListeners(0);
-
-const eventChannel = (userId: string) => `wg-chat:${userId}`;
-
-const requireUser = (ctx: { user?: { id: string; username: string } | undefined }) =>
-  ctx.user as { id: string; username: string };
-
-const rememberUser = (userId: string, username: string) => {
-  usernameToId.set(username, userId);
+const conversationKey = (userA: string, userB: string) => {
+  const [first, second] = [userA, userB].sort((a, b) => a.localeCompare(b));
+  return `${first}::${second}`;
 };
 
-const emitMessageEvents = (senderId: string, message: ChatMessage) => {
-  const senderEvent: ChatEventRecord = {
-    id: message.id,
-    event: {
-      type: "message",
-      message,
-      self: message.from,
-    },
-  };
-  emitter.emit(eventChannel(senderId), senderEvent);
-
-  const recipientId = usernameToId.get(message.to);
-  if (!recipientId) {
-    return;
+const ensureConversation = (userA: string, userB: string) => {
+  const key = conversationKey(userA, userB);
+  let existing = conversations.get(key);
+  if (!existing) {
+    existing = [];
+    conversations.set(key, existing);
   }
+  return existing;
+};
 
-  const recipientSubscribedTo = subscriptions.get(recipientId);
-  if (recipientSubscribedTo !== message.from) {
-    return;
+const getConversation = (userA: string, userB: string) => {
+  const key = conversationKey(userA, userB);
+  return conversations.get(key) ?? [];
+};
+
+const requireUser = (ctx: { user?: { id: string; username: string } }) => {
+  if (!ctx.user) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "User context missing",
+    });
   }
-
-  const recipientEvent: ChatEventRecord = {
-    id: message.id,
-    event: {
-      type: "message",
-      message,
-      self: message.to,
-    },
-  };
-  emitter.emit(eventChannel(recipientId), recipientEvent);
+  return ctx.user;
 };
 
 export const appRouter = router({
-  events: protectedProcedure
-    .subscription(async function* ({ ctx, signal }) {
-      const user = requireUser(ctx);
-      rememberUser(user.id, user.username);
-
-      const channel = eventChannel(user.id);
-      const iterator = on(emitter, channel, { signal });
-
-      yield tracked(randomUUID(), {
-        type: "self",
-        self: user.username,
-      });
-
-      for await (const [record] of iterator) {
-        const payload = record as ChatEventRecord;
-        yield tracked(payload.id, payload.event);
-      }
-    }),
+  self: protectedProcedure.query(({ ctx }) => {
+    const user = requireUser(ctx);
+    return { username: user.username };
+  }),
+  currentRecipient: protectedProcedure.query(({ ctx }) => {
+    const user = requireUser(ctx);
+    return { recipient: subscriptions.get(user.id) ?? null };
+  }),
   setRecipient: protectedProcedure
     .input(
       z.object({
@@ -102,7 +62,6 @@ export const appRouter = router({
     )
     .mutation(({ ctx, input }) => {
       const user = requireUser(ctx);
-      rememberUser(user.id, user.username);
 
       const target = input.username.trim();
 
@@ -124,23 +83,55 @@ export const appRouter = router({
     )
     .mutation(({ ctx, input }) => {
       const user = requireUser(ctx);
-      rememberUser(user.id, user.username);
+
+      const recipient = input.to.trim();
+      if (!recipient) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Recipient is required to send a message.",
+        });
+      }
+
+      const text = input.body.trim();
+      if (!text) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot send an empty message.",
+        });
+      }
 
       const message: ChatMessage = {
         id: randomUUID(),
         from: user.username,
-        to: input.to,
-        body: input.body,
+        to: recipient,
+        body: text,
         timestamp: Date.now(),
       };
 
-      emitMessageEvents(user.id, message);
+      const conversation = ensureConversation(user.username, recipient);
+      conversation.push(message);
+
+      if (conversation.length > MESSAGE_HISTORY_LIMIT) {
+        conversation.splice(0, conversation.length - MESSAGE_HISTORY_LIMIT);
+      }
 
       return { id: message.id };
     }),
-  currentRecipient: protectedProcedure.query(({ ctx }) => {
-    const user = requireUser(ctx);
-    rememberUser(user.id, user.username);
-    return { recipient: subscriptions.get(user.id) ?? null };
-  }),
+  messages: protectedProcedure
+    .input(
+      z.object({
+        with: z.string(),
+      }),
+    )
+    .query(({ ctx, input }) => {
+      const user = requireUser(ctx);
+      const other = input.with.trim();
+
+      if (!other) {
+        return { messages: [] as ChatMessage[] };
+      }
+
+      const messages = getConversation(user.username, other);
+      return { messages: [...messages] };
+    }),
 });

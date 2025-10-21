@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { LuCheck } from "react-icons/lu";
 import { MdCancel } from "react-icons/md";
 import { trpc } from "@/utils/trpc";
@@ -7,6 +9,10 @@ import { trpc } from "@/utils/trpc";
 export default function Home() {
   const ping = trpc.health.ping.useQuery();
   const dbPing = trpc.health.db.useQuery();
+  const router = useRouter();
+  useEffect(() => {
+    router.push("/login");
+  });
   return (
     <div className="max-h-screen h-screen flex justify-center items-center">
       <div>

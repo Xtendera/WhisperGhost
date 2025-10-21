@@ -3,56 +3,12 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/utils/trpc";
 
-type ChatMessage = {
-  id: string;
-  from: string;
-  to: string;
-  body: string;
-  timestamp: number;
-};
-
-type SubscriptionEvent =
-  | {
-      type: "self";
-      self: string;
-    }
-  | {
-      type: "message";
-      message: ChatMessage;
-      self: string;
-    };
-
 export default function App() {
-  const [self, setSelf] = useState<string | null>(null);
   const [recipient, setRecipient] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  trpc.app.events.useSubscription(undefined, {
-    onData(event) {
-      const payload = event.data as SubscriptionEvent;
-
-      if (payload.type === "self") {
-        setSelf(payload.self);
-        return;
-      }
-
-      if (payload.type !== "message") {
-        return;
-      }
-
-      setSelf(payload.self);
-
-      setMessages((prev) => {
-        if (prev.some((message) => message.id === payload.message.id)) {
-          return prev;
-        }
-        return [...prev, payload.message];
-      });
-    },
-  });
-
+  const { data: selfData } = trpc.app.self.useQuery();
   const { data: initialRecipient } = trpc.app.currentRecipient.useQuery();
 
   useEffect(() => {
@@ -63,12 +19,29 @@ export default function App() {
 
   const utils = trpc.useUtils();
 
+  const messagesQuery = trpc.app.messages.useQuery(
+    { with: recipient ?? "" },
+    {
+      enabled: Boolean(recipient),
+      refetchInterval: 2000,
+    },
+  );
+
+  const sortedMessages = useMemo(() => {
+    const list = messagesQuery.data?.messages ?? [];
+    return [...list].sort((a, b) => a.timestamp - b.timestamp);
+  }, [messagesQuery.data]);
+
   const setRecipientMutation = trpc.app.setRecipient.useMutation({
     onSuccess(data) {
       setError(null);
-      setMessages([]);
       setRecipient(data.recipient);
       void utils.app.currentRecipient.invalidate();
+      if (data.recipient) {
+        void utils.app.messages.invalidate({ with: data.recipient });
+      } else {
+        void utils.app.messages.invalidate({ with: "" });
+      }
     },
     onError(err) {
       setError(err.message);
@@ -78,16 +51,16 @@ export default function App() {
   const sendMessageMutation = trpc.app.sendMessage.useMutation({
     onSuccess() {
       setError(null);
+      if (recipient) {
+        void utils.app.messages.invalidate({ with: recipient });
+      }
     },
     onError(err) {
       setError(err.message);
     },
   });
 
-  const sortedMessages = useMemo(
-    () => [...messages].sort((a, b) => a.timestamp - b.timestamp),
-    [messages],
-  );
+  const self = selfData?.username ?? null;
 
   const handleChangeRecipient = () => {
     const next = window.prompt(
@@ -132,13 +105,13 @@ export default function App() {
         </div>
       </div>
       <div className="p-4 w-screen h-screen space-y-2 overflow-y-auto">
-        {error ? (
-          <div className="text-red-400 text-sm">{error}</div>
-        ) : null}
-        {sortedMessages.length === 0 ? (
+        {error ? <div className="text-red-400 text-sm">{error}</div> : null}
+        {!recipient ? (
           <div className="text-white/40 text-center pt-8">
-            {recipient ? "No messages yet." : "Choose someone to start chatting."}
+            Choose someone to start chatting.
           </div>
+        ) : sortedMessages.length === 0 ? (
+          <div className="text-white/40 text-center pt-8">No messages yet.</div>
         ) : (
           sortedMessages.map((message) => {
             const isSelf = message.from === self;
@@ -161,7 +134,9 @@ export default function App() {
         <input
           className="p-4 border rounded-xl w-full focus:outline-none"
           placeholder={
-            recipient ? `Message ${recipient}...` : "Choose someone before messaging"
+            recipient
+              ? `Message ${recipient}...`
+              : "Choose someone before messaging"
           }
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
