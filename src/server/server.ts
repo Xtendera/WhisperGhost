@@ -9,10 +9,9 @@ import { createContext } from "./api/trpc";
 
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOSTNAME ?? "0.0.0.0";
 
 async function main() {
-  const app = next({ dev, hostname });
+  const app = next({ dev });
   const handle = app.getRequestHandler();
 
   await app.prepare();
@@ -48,9 +47,9 @@ async function main() {
     });
   });
 
-  server.listen(port, hostname, () => {
+  server.listen(port, () => {
     console.log(
-      `> Server listening at http://${hostname}:${port} (${dev ? "dev" : "prod"})`,
+      `> Server listening at http://localhost:${port} (${dev ? "dev" : "prod"})`,
     );
   });
 
